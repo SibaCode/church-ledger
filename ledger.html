@@ -1,0 +1,323 @@
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Church Finance Ledger</title>
+
+  <!-- Poppins font -->
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet" />
+
+  <!-- Bootstrap 5 CSS -->
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-color: #f8f9fa;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 900px;
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    table th, table td {
+      vertical-align: middle;
+    }
+    .btn-rounded {
+      border-radius: 50px;
+    }
+    /* Modal vertical center */
+    .modal-dialog {
+      margin-top: 10vh;
+    }
+  </style>
+
+</head>
+<body>
+
+  <div class="container shadow-sm">
+    <h1 class="mb-4 text-center text-primary">Church Finance Ledger</h1>
+
+
+<form id="entryForm" class="row g-3 mb-4">
+  <div class="col-md-3">
+    <input type="date" id="date" class="form-control rounded" required />
+  </div>
+  <div class="col-md-5">
+    <input type="text" id="description" class="form-control rounded" placeholder="Description" required />
+  </div>
+  <div class="col-md-2">
+    <input type="number" id="amount" class="form-control rounded" placeholder="Amount (R)" required step="0.01" min="0" />
+  </div>
+  <div class="col-md-2 d-grid">
+    <button type="submit" class="btn btn-primary btn-rounded">Add Entry</button>
+  </div>
+</form>
+
+<div class="mb-3 d-flex align-items-center gap-3">
+  <label for="monthSelect" class="form-label mb-0">Filter by Month:</label>
+  <select id="monthSelect" class="form-select rounded" style="max-width: 200px;">
+    <option value="">All</option>
+  </select>
+</div>
+
+<div id="ledgerCard" class="table-responsive">
+  <table class="table table-striped table-bordered rounded">
+    <thead class="table-primary rounded">
+      <tr>
+        <th>Date</th>
+        <th>Description</th>
+        <th>Amount (R)</th>
+        <th style="width: 140px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="entryTableBody"></tbody>
+  </table>
+</div>
+
+<div class="text-end fw-bold fs-5" id="totalDisplay">Total: R0.00</div>
+
+<div class="d-flex justify-content-end mt-3">
+  <button id="downloadPdfBtn" class="btn btn-success btn-rounded">Download PDF</button>
+</div>
+
+  </div>
+
+  <!-- Edit Modal -->
+
+  <div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content rounded">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Entry</h5>
+          <button type="button" class="btn-close" id="cancelEditBtn" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editForm" class="row g-3">
+            <div class="col-12">
+              <input type="date" id="editDate" class="form-control rounded" required />
+            </div>
+            <div class="col-12">
+              <input type="text" id="editDescription" class="form-control rounded" placeholder="Description" required />
+            </div>
+            <div class="col-12">
+              <input type="number" id="editAmount" class="form-control rounded" placeholder="Amount (R)" required step="0.01" min="0" />
+            </div>
+            <div class="col-12 d-grid">
+              <button type="submit" class="btn btn-primary btn-rounded">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap 5 JS bundle -->
+<!-- Firebase App (core) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<!-- Firestore -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- jsPDF & html2canvas -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <script>
+    // Firebase initialization
+    const firebaseConfig = {
+      apiKey: "AIzaSyAYwi8LehN7DpwlA7kEt-r3CFMetxVoZJI",
+      authDomain: "churchledger-64200.firebaseapp.com",
+      projectId: "churchledger-64200",
+      storageBucket: "churchledger-64200.appspot.com",
+      messagingSenderId: "16697753870",
+      appId: "1:16697753870:web:306935c049ac213bfa175f",
+      measurementId: "G-RECFK377Y8"
+    };
+  
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  
+    const entryForm = document.getElementById('entryForm');
+    const entryTableBody = document.getElementById('entryTableBody');
+    const totalDisplay = document.getElementById('totalDisplay');
+  
+    let entries = [];
+  
+    document.getElementById('downloadPdfBtn').addEventListener('click', () => {
+      const doc = new window.jspdf.jsPDF();
+      doc.setFontSize(18);
+      doc.text('Church Finance Ledger', 14, 22);
+  
+      doc.setFontSize(12);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 30);
+  
+      const original = document.getElementById('ledgerCard');
+      const clone = original.cloneNode(true);
+  
+      // Remove buttons
+      clone.querySelectorAll('.btn-warning, .btn-danger').forEach(btn => btn.remove());
+  
+      // Add total row
+      let totalAmount = 0;
+      clone.querySelectorAll('tbody tr').forEach(row => {
+        const amountCell = row.children[2];
+        if (amountCell) {
+          const amount = parseFloat(amountCell.textContent.replace(/R|,/g, '').trim());
+          if (!isNaN(amount)) totalAmount += amount;
+        }
+      });
+  
+      const totalRow = document.createElement('tr');
+      totalRow.innerHTML = `
+        <td colspan="2" style="font-weight: bold; text-align: right;">Total:</td>
+        <td style="font-weight: bold;">R ${totalAmount.toFixed(2)}</td>
+        <td></td>
+      `;
+      clone.querySelector('tbody').appendChild(totalRow);
+  
+      const hiddenContainer = document.createElement('div');
+      hiddenContainer.style.position = 'fixed';
+      hiddenContainer.style.left = '-10000px';
+      hiddenContainer.style.top = '0';
+      hiddenContainer.appendChild(clone);
+      document.body.appendChild(hiddenContainer);
+  
+      html2canvas(clone).then(canvas => {
+        const imgData = canvas.toDataURL('image/png');
+        const imgProps = doc.getImageProperties(imgData);
+        const pdfWidth = doc.internal.pageSize.getWidth() - 28;
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+  
+        doc.addImage(imgData, 'PNG', 14, 35, pdfWidth, pdfHeight);
+        doc.save('church-finance-ledger.pdf');
+  
+        document.body.removeChild(hiddenContainer);
+      });
+    });
+  
+    entryForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+  
+      const date = document.getElementById('date').value;
+      const description = document.getElementById('description').value;
+      const amount = parseFloat(document.getElementById('amount').value);
+  
+      if (!date || !description || isNaN(amount)) {
+        alert('Please fill in all fields correctly.');
+        return;
+      }
+  
+      const entry = { date, description, amount };
+      db.collection("ledgerEntries").add(entry)
+        .then((docRef) => {
+          entries.push({ id: docRef.id, ...entry });
+          updateTable();
+        })
+        .catch((error) => {
+          console.error("Error adding document: ", error);
+        });
+  
+      entryForm.reset();
+    });
+  
+    function updateTable() {
+      entryTableBody.innerHTML = '';
+      let total = 0;
+  
+      entries.forEach((entry, index) => {
+        total += entry.amount;
+  
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${entry.date}</td>
+          <td>${entry.description}</td>
+          <td>R ${entry.amount.toFixed(2)}</td>
+          <td>
+            <button class="btn btn-warning btn-sm" onclick="editEntry(${index})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteEntry(${index})">Delete</button>
+          </td>
+        `;
+        entryTableBody.appendChild(row);
+      });
+  
+      totalDisplay.textContent = `Total: R${total.toFixed(2)}`;
+    }
+  
+    // Load existing entries on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      db.collection("ledgerEntries").orderBy("date").get()
+        .then((querySnapshot) => {
+          entries = [];
+          querySnapshot.forEach((doc) => {
+            entries.push({ id: doc.id, ...doc.data() });
+          });
+          updateTable();
+        })
+        .catch((error) => {
+          console.error("Error fetching documents: ", error);
+        });
+    });
+  
+    // Delete entry from Firestore
+    function deleteEntry(index) {
+      const entry = entries[index];
+      db.collection("ledgerEntries").doc(entry.id).delete()
+        .then(() => {
+          entries.splice(index, 1);
+          updateTable();
+        })
+        .catch((error) => {
+          console.error("Error deleting document: ", error);
+        });
+    }
+  
+    // Edit entry
+    function editEntry(index) {
+      const entry = entries[index];
+  
+      document.getElementById('editDate').value = entry.date;
+      document.getElementById('editDescription').value = entry.description;
+      document.getElementById('editAmount').value = entry.amount;
+  
+      const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+      editModal.show();
+  
+      const editForm = document.getElementById('editForm');
+      editForm.onsubmit = function (e) {
+        e.preventDefault();
+  
+        const updatedEntry = {
+          date: document.getElementById('editDate').value,
+          description: document.getElementById('editDescription').value,
+          amount: parseFloat(document.getElementById('editAmount').value),
+        };
+  
+        db.collection("ledgerEntries").doc(entry.id).update(updatedEntry)
+          .then(() => {
+            entries[index] = { id: entry.id, ...updatedEntry };
+            updateTable();
+            editModal.hide();
+          })
+          .catch((error) => {
+            console.error("Error updating document: ", error);
+          });
+      };
+  
+      document.getElementById('cancelEditBtn').onclick = () => editModal.hide();
+    }
+  </script>
+  
+</body>
+</html>
