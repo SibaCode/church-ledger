@@ -18,6 +18,15 @@
       cursor: pointer;
       text-decoration: underline;
     }
+    .list-group-item.active {
+      background-color: #0d6efd;
+      color: white;
+      font-weight: 600;
+    }
+    .btn-sm {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+    }
   </style>
 </head>
 <body>
@@ -49,9 +58,16 @@
     <!-- People Management Section -->
     <div class="card p-4" id="peopleSection" style="display: none;">
       <h4 id="selectedFileTitle"></h4>
-      <div class="input-group mb-3">
-        <input id="personName" type="text" class="form-control" placeholder="Add person name" />
-        <button class="btn btn-success" onclick="addPerson()">Add</button>
+      <div class="row g-2 mb-3">
+        <div class="col-md-7">
+          <input id="personName" type="text" class="form-control" placeholder="Person name" />
+        </div>
+        <div class="col-md-3">
+          <input id="personAmount" type="number" step="0.01" min="0" class="form-control" placeholder="Amount (e.g. 100.00)" />
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-success w-100" onclick="addPerson()">Add</button>
+        </div>
       </div>
       <ul id="peopleList" class="list-group"></ul>
     </div>
@@ -71,23 +87,50 @@
       appId: "1:16697753870:web:306935c049ac213bfa175f",
       measurementId: "G-RECFK377Y8"
     };
+    
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-
-    let contributions = {};
-    let selectedFileId = null;
-
+  
+    let contributions = {}; // Stores all files and their data
+    let selectedFileId = null; // Tracks which file is currently selected
+  
+    // Load files from Firestore and listen for real-time updates
     function loadFiles() {
-      db.collection("contributionFiles").orderBy("date", "desc").get()
-        .then(snapshot => {
+      db.collection("contributionFiles").orderBy("date", "desc")
+        .onSnapshot(snapshot => {
           contributions = {};
           snapshot.forEach(doc => {
             contributions[doc.id] = doc.data();
           });
           renderFiles();
+  
+          // If a file is selected and still exists, show its people list
+          if (selectedFileId && contributions[selectedFileId]) {
+            renderPeople(contributions[selectedFileId].people || []);
+            document.getElementById('peopleSection').style.display = 'block';
+            document.getElementById('selectedFileTitle').textContent = `People for: ${contributions[selectedFileId].name}`;
+          } else {
+            // Hide people section if no file is selected
+            document.getElementById('peopleSection').style.display = 'none';
+          }
+        }, err => {
+          console.error('Error loading files:', err);
         });
     }
-
+  
+    // Format Firestore Timestamp or Date string to local date string
+    function formatDate(date) {
+      if (!date) return '';
+      let d;
+      if (date.seconds) { // Firestore Timestamp
+        d = new Date(date.seconds * 1000);
+      } else {
+        d = new Date(date);
+      }
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+  
+    // Render the list of files in the sidebar or list area
     function renderFiles() {
       const list = document.getElementById('fileList');
       list.innerHTML = '';
@@ -95,68 +138,176 @@
         list.innerHTML = '<li class="list-group-item">No files created yet.</li>';
         return;
       }
-
+  
       Object.entries(contributions).forEach(([id, data]) => {
+        const totalAmount = (data.people || []).reduce((sum, p) => sum + (p.amount || 0), 0);
         const li = document.createElement('li');
         li.className = 'list-group-item d-flex justify-content-between align-items-center';
-        li.innerHTML = `<span class="file-link" onclick="selectFile('${id}')">${data.name} | ${data.date}</span> <span class="badge bg-secondary">${(data.people || []).length} people</span>`;
+  
+        // Add 'selected' highlight class if this file is currently selected
+        if (id === selectedFileId) {
+          li.classList.add('active');
+        }
+  
+        // File name and date span with click to select
+        const fileLink = document.createElement('span');
+        fileLink.className = 'file-link';
+        fileLink.style.cursor = 'pointer';
+        fileLink.textContent = `${data.name} | ${formatDate(data.date)}`;
+        fileLink.onclick = () => selectFile(id);
+
+        // Badges for people count and total amount
+        const badges = document.createElement('span');
+        badges.innerHTML = `
+          <span class="badge bg-secondary me-2">${(data.people || []).length} people</span>
+          <span class="badge bg-success me-2">R${totalAmount.toFixed(2)}</span>
+        `;
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-danger btn-sm';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.onclick = (e) => {
+          e.stopPropagation(); // Prevent triggering selectFile
+          deleteFile(id);
+        };
+
+        li.appendChild(fileLink);
+        li.appendChild(badges);
+        li.appendChild(deleteBtn);
+
         list.appendChild(li);
       });
     }
-
-    function createFile() {
-      const name = document.getElementById('fileName').value.trim();
-      const date = document.getElementById('fileDate').value.trim();
-      document.getElementById('fileNameError').textContent = name ? '' : 'File name required';
-      document.getElementById('fileDateError').textContent = date ? '' : 'Date required';
-
-      if (!name || !date) return;
-
-      db.collection("contributionFiles").add({ name, date, people: [], createdAt: firebase.firestore.FieldValue.serverTimestamp() })
-        .then(() => {
-          document.getElementById('fileName').value = '';
-          document.getElementById('fileDate').value = '';
-          loadFiles();
-        });
-    }
-
+  
+    // When a file is clicked, set selectedFileId, update UI to show people
     function selectFile(id) {
       selectedFileId = id;
       const file = contributions[id];
+      if (!file) return;
+  
       document.getElementById('peopleSection').style.display = 'block';
       document.getElementById('selectedFileTitle').textContent = `People for: ${file.name}`;
       document.getElementById('personName').value = '';
+      document.getElementById('personAmount').value = '';
+  
+      // Render the people list for the selected file
       renderPeople(file.people || []);
+  
+      // Re-render the file list to update highlight on selected file
+      renderFiles();
     }
-
+  
+    // Display people and their contributions for the selected file
     function renderPeople(people) {
       const list = document.getElementById('peopleList');
       list.innerHTML = '';
-      people.forEach((person, index) => {
+      people.forEach(({ name, amount }) => {
         const li = document.createElement('li');
-        li.className = 'list-group-item';
-        li.textContent = person;
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        li.textContent = name;
+        const span = document.createElement('span');
+        span.className = 'badge bg-primary rounded-pill';
+        span.textContent = `R${amount.toFixed(2)}`;
+        li.appendChild(span);
         list.appendChild(li);
       });
     }
-
+  
+    // Add a new person contribution to the selected file in Firestore
     function addPerson() {
+      if (!selectedFileId) {
+        alert('Please select a file first.');
+        return;
+      }
+
       const person = document.getElementById('personName').value.trim();
-      if (!person) return;
-
-      const file = contributions[selectedFileId];
-      const updatedPeople = [...(file.people || []), person];
-
-      db.collection('contributionFiles').doc(selectedFileId).update({ people: updatedPeople })
-        .then(() => {
-          contributions[selectedFileId].people = updatedPeople;
-          document.getElementById('personName').value = '';
-          renderPeople(updatedPeople);
-          renderFiles();
-        });
+      const amountStr = document.getElementById('personAmount').value.trim();
+      const amount = parseFloat(amountStr);
+  
+      if (!person) {
+        alert('Please enter a name.');
+        return;
+      }
+      if (!amountStr || isNaN(amount) || amount <= 0) {
+        alert('Please enter a valid amount greater than 0.');
+        return;
+      }
+  
+      const fileRef = db.collection('contributionFiles').doc(selectedFileId);
+  
+      // Atomically update the people array with the new person
+      fileRef.update({
+        people: firebase.firestore.FieldValue.arrayUnion({ name: person, amount })
+      })
+      .then(() => {
+        // Clear inputs
+        document.getElementById('personName').value = '';
+        document.getElementById('personAmount').value = '';
+      })
+      .catch(err => {
+        alert('Failed to add person: ' + err.message);
+      });
     }
-
-    window.addEventListener('DOMContentLoaded', loadFiles);
+  
+    // Create a new contribution file document in Firestore
+    function createFile() {
+      const nameInput = document.getElementById('fileName');
+      const dateInput = document.getElementById('fileDate');
+      const fileNameError = document.getElementById('fileNameError');
+      const fileDateError = document.getElementById('fileDateError');
+  
+      // Reset errors
+      fileNameError.textContent = '';
+      fileDateError.textContent = '';
+  
+      const name = nameInput.value.trim();
+      const dateValue = dateInput.value;
+  
+      let valid = true;
+      if (!name) {
+        fileNameError.textContent = 'File name is required.';
+        valid = false;
+      }
+      if (!dateValue) {
+        fileDateError.textContent = 'Date is required.';
+        valid = false;
+      }
+  
+      if (!valid) return;
+  
+      // Create new file document
+      db.collection('contributionFiles').add({
+        name,
+        date: new Date(dateValue),
+        people: []
+      }).then(docRef => {
+        nameInput.value = '';
+        dateInput.value = '';
+        // Automatically select the new file after creation
+        selectedFileId = docRef.id;
+        loadFiles();
+      }).catch(err => {
+        alert('Error creating file: ' + err.message);
+      });
+    }
+  
+    // Delete a contribution file (with confirmation)
+    function deleteFile(id) {
+      if (!confirm('Are you sure you want to delete this file and all its data?')) return;
+      db.collection('contributionFiles').doc(id).delete()
+      .then(() => {
+        if (selectedFileId === id) {
+          selectedFileId = null;
+          document.getElementById('peopleSection').style.display = 'none';
+        }
+        loadFiles();
+      })
+      .catch(err => alert('Failed to delete file: ' + err.message));
+    }
+  
+    // Initial load
+    loadFiles();
   </script>
 </body>
 </html>
